@@ -15,8 +15,13 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <future>
+#include <thread>
+#include <atomic>
+#include <utility>
 
 #include <boost/algorithm/hex.hpp>
+#include <boost/scoped_ptr.hpp>
 
 #include <osquery/events.h>
 
@@ -24,6 +29,17 @@ namespace osquery {
 
 #define AUDIT_TYPE_SYSCALL 1300
 #define AUDIT_TYPE_SOCKADDR 1306
+
+typedef std::pair<audit_reply, std::size_t> AuditReplyDescriptor;
+
+struct EventReaderTaskData final {
+  std::atomic<bool> terminate;
+
+  int audit_handle;
+
+  std::vector<AuditReplyDescriptor> audit_reply_queue;
+  std::mutex queue_mutex;
+};
 
 /**
  * @brief A simple audit rule description that can be populated via a config.
@@ -249,7 +265,7 @@ class AuditEventPublisher
   Status run() override;
 
  public:
-  AuditEventPublisher() : EventPublisher() {}
+  AuditEventPublisher();
 
   virtual ~AuditEventPublisher() {
     tearDown();
@@ -290,14 +306,17 @@ class AuditEventPublisher
   /// Is this process in control of the audit subsystem.
   bool control_{false};
 
-  /// The last (most recent) audit reply.
-  struct audit_reply reply_;
-
   /// Track all rule data added by the publisher.
   std::vector<struct AuditRuleInternal> transient_rules_;
 
- private:
-  friend class AuditConsumerRunner;
+  /// Event reader task data
+  EventReaderTaskData event_reader_task_data_;
+
+  /// Event reader task
+  boost::scoped_ptr<std::thread> event_reader_thread_;
+
+  /// Event reader result
+  std::shared_future<Status> event_reader_result_;
 };
 
 /**
